@@ -1,0 +1,18 @@
+{
+    "name": "bookdownloader",
+    "version": "1.0.0",
+    "description": "",
+    "main": "index.js",
+    "scripts": {
+        "start": "node index.js",
+        "test": "echo \"Error: no test specified\" && exit 1"
+    },
+    "author": "",
+    "license": "ISC",
+    "dependencies": {
+        "archiver": "^5.0.0",
+        "gbk": "^0.1.0",
+        "jsdom": "^16.4.0",
+        "node-fetch": "^2.6.0"
+    }
+}
