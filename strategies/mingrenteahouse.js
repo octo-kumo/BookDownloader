@@ -6,7 +6,6 @@ const JSDOM = require('jsdom').JSDOM;
 
 const EXACT_INFO_REGEX = /next_id=(?<next>\d+);\s*bookid=(?<book>\d+);\s*chapterid=(?<chapter>\d+);\s*mybookid=(?<my_book>\d+);/;
 
-const NAME_REGEX = /<h1 id="chaptername" class="chaptername">(.+)<\/h1>/u;
 const CCTX_REGEX = /var\s*cctxt='([^']+)'/u;
 const CHALLENGE_REGEX = /cctxt=cctxt\.replace\(\/(?<victim>[^']+)\/g,'(?<with>[^']+)'\);/ug;
 
@@ -57,7 +56,7 @@ class MingRenTeaHouseStrategy {
 
         this.lastCachedPage = page + 1;
         fs.writeFileSync(this.getPath(), JSON.stringify(this));
-        if (hasNextChapter) await this.fetchChapters(page + 1);
+        if (hasNextChapter) return await this.fetchChapters(page + 1);
         else {
             console.log(`Loaded all pages with total of ${this.chapterURLs.length} chapters`);
             this.finishedLoading = true;
@@ -79,9 +78,17 @@ class MingRenTeaHouseStrategy {
         console.debug(`zipping from ${start} to ${end}`);
         let count = 0;
         for (let i = start; i < end; i++) {
-            let chapter = fs.existsSync(this.getBookPath() + (i + 1) + ".json") ?
-                JSON.parse(fs.readFileSync(this.getBookPath() + (i + 1) + ".json")) :
-                await this.loadChapter(this.chapterURLs[i]);
+            let chapter;
+            try {
+                chapter = fs.existsSync(this.getBookPath() + (i + 1) + ".json") ?
+                    JSON.parse(fs.readFileSync(this.getBookPath() + (i + 1) + ".json").toString()) :
+                    await this.loadChapter(this.chapterURLs[i]);
+            } catch (err) {
+                if (this.shouldKeepTrying) {
+                    i--;
+                    continue;
+                } else console.error(err);
+            }
             chapter.content = chapter.content.replace(/&nbsp;/g, '');
             fs.writeFileSync(this.getBookPath() + (i + 1) + ".json", JSON.stringify(chapter));
             fs.writeFileSync(this.getBookPath() + (i + 1) + "_" + chapter.chapterName + ".txt", chapter.content);
@@ -106,8 +113,7 @@ class MingRenTeaHouseStrategy {
             let challenge;
             while ((challenge = CHALLENGE_REGEX.exec(content)) !== null) cctx = cctx.replace(new RegExp(challenge.groups.victim, 'g'), challenge.groups.with);
         } else {
-            var geval = eval;
-            geval(content);
+            eval(content);
             cctx = cctxt;
         }
         cctx = cctx.replace(/<br\s*\/?>/g, '\n');
@@ -128,6 +134,12 @@ class MingRenTeaHouseStrategy {
     getBookPath() {
         return `./cache/${this.strategy}.${this.bookId}.chapters/`;
     }
+
+    keepTrying() {
+        this.shouldKeepTrying = !this.shouldKeepTrying;
+        return this;
+    }
+
 }
 
 module.exports = MingRenTeaHouseStrategy;
