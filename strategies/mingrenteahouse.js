@@ -3,6 +3,7 @@ const gbk = require('gbk');
 const fetch = require('node-fetch');
 const archiver = require('archiver');
 const JSDOM = require('jsdom').JSDOM;
+const safeEval = require('safe-eval');
 
 const EXACT_INFO_REGEX = /next_id=(?<next>\d+);\s*bookid=(?<book>\d+);\s*chapterid=(?<chapter>\d+);\s*mybookid=(?<my_book>\d+);/;
 
@@ -66,6 +67,8 @@ class MingRenTeaHouseStrategy {
     }
 
     async loadChapters(start = 0, end) {
+        process.stdout.cursorTo(0, 0);
+        process.stdout.clearLine();
         if (!this.finishedLoading) throw("Chapters are not fully loaded yet");
         if (!fs.existsSync(this.getBookPath())) fs.mkdirSync(this.getBookPath());
         console.debug("Loading Chapters");
@@ -77,52 +80,68 @@ class MingRenTeaHouseStrategy {
         end = end || this.chapterURLs.length;
         console.debug(`zipping from ${start} to ${end}`);
         let count = 0;
-        for (let i = start; i < end; i++) {
-            let chapter;
-            try {
-                chapter = fs.existsSync(this.getBookPath() + (i + 1) + ".json") ?
-                    JSON.parse(fs.readFileSync(this.getBookPath() + (i + 1) + ".json").toString()) :
-                    await this.loadChapter(this.chapterURLs[i]);
-            } catch (err) {
-                if (this.shouldKeepTrying) {
-                    i--;
-                    continue;
-                } else console.error(err);
-            }
-            chapter.content = chapter.content.replace(/&nbsp;/g, '');
+        process.stdout.clearLine();
+        for (let i = start; i < end; i++) try {
+            process.stdout.write("\n");
+            let chapter = fs.existsSync(this.getBookPath() + (i + 1) + ".json") ?
+                JSON.parse(fs.readFileSync(this.getBookPath() + (i + 1) + ".json").toString()) :
+                await this.loadChapter(this.chapterURLs[i]);
+            chapter.content = chapter.content.replace(/&nbsp;/g, ' ').replace(/ {2,}/g, ' ').replace(/\n +/g, '\n');
             fs.writeFileSync(this.getBookPath() + (i + 1) + ".json", JSON.stringify(chapter));
-            fs.writeFileSync(this.getBookPath() + (i + 1) + "_" + chapter.chapterName + ".txt", chapter.content);
-            archive.append(chapter.content, {name: `${i + 1}_${chapter.chapterName}.txt`});
+            archive.append(chapter.chapterName + "\n\n" + chapter.content, {name: `${i + 1}_${chapter.chapterName}.txt`});
+            process.stdout.cursorTo(count % 32, 2);
             process.stdout.write(".");
             count++;
-            if (count % 32 === 0) process.stdout.write(`| ${count}/${end - start} #${i + 1}\n`);
+            process.stdout.cursorTo(32);
+            process.stdout.write(`| ${count}/${end - start} #${i + 1}`);
+            if (count % 32 === 0) process.stdout.clearLine();
+        } catch (err) {
+            if (this.shouldKeepTrying) i--;
+            else {
+                console.log("\n");
+                console.log("Index = " + i);
+                console.log("Error URL = " + this.chapterURLs[i]);
+                console.log(err);
+                process.exit(0);
+            }
         }
         archive.finalize();
     }
 
     async loadChapter(url) {
+        process.stdout.clearLine();
+        process.stdout.write(`Loading...\n`);
+        process.stdout.clearLine();
+        process.stdout.write(`- url = ${url}\n`);
         let doc = new JSDOM(await fetch(url).then(res => res.buffer())).window.document;
         let chapterName = doc.getElementById("chaptername").textContent;
         let info = EXACT_INFO_REGEX.exec(doc.head.innerHTML);
-        let content = await fetch('https://m.mingrenteahouse.com/files/article/html' + 555 + '/' + Math.floor(info.groups.book / 1000) + '/' + info.groups.book + '/' + info.groups.chapter + '.txt').then(res => res.buffer());
-        content = gbk.toString('utf-8', content);
-        let match = content.match(CCTX_REGEX);
-        let cctx;
+        let content_url = 'https://m.mingrenteahouse.com/files/article/html' + 555 + '/' + Math.floor(info.groups.book / 1000) + '/' + info.groups.book + '/' + info.groups.chapter + '.txt';
+        process.stdout.clearLine();
+        process.stdout.write(`- name = ${chapterName}\n`);
+        process.stdout.clearLine();
+        process.stdout.write(`- content url = ${content_url}\n`);
+        process.stdout.clearLine();
+
+        let content = gbk.toString('utf-8', await fetch(content_url).then(res => res.buffer()));
+        let match = CCTX_REGEX.exec(content);
         if (match) {
-            cctx = match[1];
+            content = match[1];
             let challenge;
-            while ((challenge = CHALLENGE_REGEX.exec(content)) !== null) cctx = cctx.replace(new RegExp(challenge.groups.victim, 'g'), challenge.groups.with);
-        } else {
-            eval(content);
-            cctx = cctxt;
-        }
-        cctx = cctx.replace(/<br\s*\/?>/g, '\n');
-        cctx = cctx.replace('&nbsp;', ' ');
-        cctx = cctx.replace(/ {2,}/, ' ');
+            while ((challenge = CHALLENGE_REGEX.exec(content)) !== null) content = content.replace(new RegExp(challenge.groups.victim, 'g'), challenge.groups.with);
+        } else content = safeEval("(function() {\n" + content + "\nreturn cctxt;})()", {
+            window: {},
+            atob: text => Buffer.from(text, 'base64').toString('binary'),
+            btoa: text => Buffer.from(text, 'binary').toString('base64')
+        });
+        content = content.replace(/<br\s*\/?>/g, '\n');
+        content = content.replace(/&nbsp;/g, ' ');
+        content = content.replace(/ {2,}/, ' ');
+        process.stdout.moveCursor(0, -4);
         return {
             url: url,
             chapterName: chapterName,
-            content: cctx
+            content: content
         };
     }
 

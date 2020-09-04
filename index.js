@@ -1,9 +1,6 @@
 const {
     MingRenTeaHouseStrategy
 } = require("./strategies");
-
-let downloader = new MingRenTeaHouseStrategy('1');
-downloader
-    .keepTrying()
+new MingRenTeaHouseStrategy('1')
     .fetchChapters()
-    .then(downloader => downloader.loadChapters(0, 1087));
+    .then(downloader => downloader.loadChapters());

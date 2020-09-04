@@ -13,6 +13,7 @@
         "archiver": "^5.0.0",
         "gbk": "^0.1.0",
         "jsdom": "^16.4.0",
-        "node-fetch": "^2.6.0"
+        "node-fetch": "^2.6.0",
+        "safe-eval": "^0.4.1"
     }
 }
