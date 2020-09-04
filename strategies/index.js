@@ -1,3 +1,4 @@
 module.exports = {
-    MingRenTeaHouseStrategy: require("./mingrenteahouse")
+    MingRenTeaHouseStrategy: require("./mingrenteahouse"),
+    QingGoo: require('./qingoo')
 };
