@@ -7,9 +7,6 @@ const safeEval = require('safe-eval');
 
 const EXACT_INFO_REGEX = /next_id=(?<next>\d+);\s*bookid=(?<book>\d+);\s*chapterid=(?<chapter>\d+);\s*mybookid=(?<my_book>\d+);/;
 
-const CCTX_REGEX = /var\s*cctxt='([^']+)'/u;
-const CHALLENGE_REGEX = /cctxt=cctxt\.replace\(\/(?<victim>[^']+)\/g,'(?<with>[^']+)'\);/ug;
-
 class MingRenTeaHouseStrategy {
     constructor(bookId) {
         this.strategy = "MingRenTeaHouse";
@@ -81,17 +78,23 @@ class MingRenTeaHouseStrategy {
         console.debug(`zipping from ${start} to ${end}`);
         let count = 0;
         process.stdout.clearLine();
+        let job_at_once = 8;
+        let jobs_cache = [];
         for (let i = start; i < end; i++) try {
+            if (jobs_cache.length < job_at_once) {
+                jobs_cache.push(this.loadChapter(i, this.chapterURLs[i]));
+                continue;
+            }
             process.stdout.write("\n");
-            let chapter = fs.existsSync(this.getBookPath() + (i + 1) + ".json") ?
-                JSON.parse(fs.readFileSync(this.getBookPath() + (i + 1) + ".json").toString()) :
-                await this.loadChapter(this.chapterURLs[i]);
-            chapter.content = chapter.content.replace(/&nbsp;/g, ' ').replace(/ {2,}/g, ' ').replace(/\n +/g, '\n');
-            fs.writeFileSync(this.getBookPath() + (i + 1) + ".json", JSON.stringify(chapter));
-            archive.append(chapter.chapterName + "\n\n" + chapter.content, {name: `${i + 1}_${chapter.chapterName}.txt`});
-            process.stdout.cursorTo(count % 32, 2);
-            process.stdout.write(".");
-            count++;
+            let chapters = await Promise.all(jobs_cache);
+            chapters.forEach(chapter => {
+                fs.writeFileSync(this.getBookPath() + (chapter.index + 1) + ".json", JSON.stringify(chapter));
+                archive.append(chapter.chapterName + "\n\n" + chapter.content, {name: `${chapter.index + 1}_${chapter.chapterName}.txt`});
+                process.stdout.cursorTo(count % 32, 2);
+                process.stdout.write(".");
+                count++;
+            });
+            jobs_cache = [];
             process.stdout.cursorTo(32);
             process.stdout.write(`| ${count}/${end - start} #${i + 1}`);
             if (count % 32 === 0) process.stdout.clearLine();
@@ -108,7 +111,8 @@ class MingRenTeaHouseStrategy {
         archive.finalize();
     }
 
-    async loadChapter(url) {
+    async loadChapter(index, url) {
+        if (fs.existsSync(this.getBookPath() + (index + 1) + ".json")) return JSON.parse(fs.readFileSync(this.getBookPath() + (index + 1) + ".json").toString());
         process.stdout.clearLine();
         process.stdout.write(`Loading...\n`);
         process.stdout.clearLine();
@@ -124,12 +128,7 @@ class MingRenTeaHouseStrategy {
         process.stdout.clearLine();
 
         let content = gbk.toString('utf-8', await fetch(content_url).then(res => res.buffer()));
-        let match = CCTX_REGEX.exec(content);
-        if (match) {
-            content = match[1];
-            let challenge;
-            while ((challenge = CHALLENGE_REGEX.exec(content)) !== null) content = content.replace(new RegExp(challenge.groups.victim, 'g'), challenge.groups.with);
-        } else content = safeEval("(function() {\n" + content + "\nreturn cctxt;})()", {
+        content = safeEval("(function() {\n" + content + "\nreturn cctxt;})()", {
             window: {},
             atob: text => Buffer.from(text, 'base64').toString('binary'),
             btoa: text => Buffer.from(text, 'binary').toString('base64')
@@ -137,9 +136,11 @@ class MingRenTeaHouseStrategy {
         content = content.replace(/<br\s*\/?>/g, '\n');
         content = content.replace(/&nbsp;/g, ' ');
         content = content.replace(/ {2,}/, ' ');
+        content = content.trim();
         process.stdout.moveCursor(0, -4);
         return {
             url: url,
+            index: index,
             chapterName: chapterName,
             content: content
         };
